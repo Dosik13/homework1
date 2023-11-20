@@ -1,11 +1,13 @@
 package gitnames
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -29,14 +31,14 @@ type Repository struct {
 	Updated  string `json:"updated_at"`
 }
 
-func fetchUsersData(usernames []string) {
-	url := "https://api.github.com/users/" + usernames[0]
+func fetchUsersData(username string) (User, error) {
+	url := "https://api.github.com/users/" + username
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	req.Header.Add("Accept", "Accept: application/json")
-	//req.Header.Add("Custom-Header", "Custom value")
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Fatal(err)
@@ -44,23 +46,20 @@ func fetchUsersData(usernames []string) {
 
 	fmt.Println("Response status:", resp.Status)
 	defer resp.Body.Close()
-	//scanner := bufio.NewScanner(resp.Body)
-	//for i := 0; scanner.Scan() && i < 15; i++ {
-	//	fmt.Println(scanner.Text())
-	//}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Fatal(err)
 	}
 	var user User
-	err = json.Unmarshal(body, &user)
 	if err := json.Unmarshal(body, &user); err != nil {
 		log.Fatal(err)
 	}
+	return user, err
 }
 
-func fetchRepos(usernames []string) {
-	url := "https://api.github.com/users/" + usernames[0] + "/repos"
+func fetchRepos(username string) ([]Repository, error) {
+	url := "https://api.github.com/users/" + username + "/repos"
 	req, err := http.NewRequest("GET", url, nil)
 
 	if err != nil {
@@ -82,14 +81,74 @@ func fetchRepos(usernames []string) {
 		log.Fatal(err)
 	}
 	var repos []Repository
-	err = json.Unmarshal(body, &repos)
 	if err := json.Unmarshal(body, &repos); err != nil {
 		log.Fatal(err)
 	}
-}
-func main() {
-	var usernames [3]string
-	usernames[1] = "angeld55"
-	usernames[0] = "YanaRGeorgieva"
 
+	return repos, err
+}
+
+func fetchLanguages(username, repo string) (map[string]int, error) {
+	url := "https://api.github.com/repos/" + username + "/" + repo + "/languages"
+	req, err := http.NewRequest("GET", url, nil)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	req.Header.Add("Accept", "Accept: application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Response status:", resp.Status)
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	var languages map[string]int
+
+	if err = json.Unmarshal(body, &languages); err != nil {
+		log.Fatal(err)
+	}
+
+	return languages, nil
+}
+
+func setup(filePath string) ([]string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var usernames []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		usernames = append(usernames, scanner.Text())
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+
+	return usernames, nil
+}
+
+func main() {
+	filePath := "D:\\goprojects\\gitnames.txt" // Replace with the path to your file
+	usernames, err := setup(filePath)
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		return
+	}
+
+	for _, word := range usernames {
+		fmt.Print(word)
+	}
 }
