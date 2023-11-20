@@ -1,4 +1,4 @@
-package gitnames
+package main
 
 import (
 	"bufio"
