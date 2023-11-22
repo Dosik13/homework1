@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/rodaine/table"
+	"github.com/jedib0t/go-pretty/table"
 	"io"
 	"log"
 	"net/http"
 	"os"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -18,7 +16,6 @@ type User struct {
 	Login       string    `json:"login"`
 	ID          int       `json:"id"`
 	Name        string    `json:"name"`
-	Bio         string    `json:"bio"`
 	PublicRepos int       `json:"public_repos"`
 	PublicGists int       `json:"public_gists"`
 	Followers   int       `json:"followers"`
@@ -27,11 +24,15 @@ type User struct {
 }
 
 type Repository struct {
-	Name     string `json:"name"`
-	Language string `json:"language"`
-	Forks    int    `json:"forks"`
-	Created  string `json:"created_at"`
-	Updated  string `json:"updated_at"`
+	Name    string `json:"name"`
+	Forks   int    `json:"forks"`
+	Created string `json:"created_at"`
+	Updated string `json:"updated_at"`
+}
+
+type Language struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
 }
 
 func fetchUsersData(username string) (User, error) {
@@ -40,6 +41,8 @@ func fetchUsersData(username string) (User, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	req.Header.Add("Authorization", "Bearer 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")
+	req.Header.Add("User-Agent", "LearningToFetch")
 	req.Header.Add("Accept", "Accept: application/json")
 
 	resp, err := http.DefaultClient.Do(req)
@@ -47,7 +50,7 @@ func fetchUsersData(username string) (User, error) {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Response status:", resp.Status)
+	//fmt.Println("Response status:", resp.Status)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -68,15 +71,16 @@ func fetchRepos(username string) ([]Repository, error) {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	req.Header.Add("Authorization", "Bearer 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")
 	req.Header.Add("Accept", "Accept: application/json")
+	req.Header.Add("User-Agent", "ForGoCourse")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Response status:", resp.Status)
+	//fmt.Println("Response status:", resp.Status)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -91,22 +95,23 @@ func fetchRepos(username string) ([]Repository, error) {
 	return repos, err
 }
 
-func fetchLanguages(username, repo string) (map[string]int, error) {
+func fetchLanguages(username, repo string) ([]Language, error) {
 	url := "https://api.github.com/repos/" + username + "/" + repo + "/languages"
 	req, err := http.NewRequest("GET", url, nil)
 
 	if err != nil {
 		log.Fatal(err)
 	}
-
+	req.Header.Add("Authorization", "Bearer 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")
 	req.Header.Add("Accept", "Accept: application/json")
+	req.Header.Add("User-Agent", "ForGoCourse")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Response status:", resp.Status)
+	fmt.Println("Response statusForLanguage:", resp.Status)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -114,7 +119,7 @@ func fetchLanguages(username, repo string) (map[string]int, error) {
 		log.Fatal(err)
 	}
 
-	var languages map[string]int
+	var languages []Language
 
 	if err = json.Unmarshal(body, &languages); err != nil {
 		log.Fatal(err)
@@ -151,24 +156,18 @@ func main() {
 		return
 	}
 
-	for _, word := range usernames {
-		fmt.Print(word)
-	}
-
 	for _, username := range usernames {
 		user, err := fetchUsersData(username)
 		if err != nil {
 			log.Fatal(err)
 		}
-
+		printUserTable(user)
 		repos, err := fetchRepos(username)
 		if err != nil {
 			log.Fatal(err)
 		}
-
+		printRepoTable(repos)
 		var totalForks int
-		languages := make(map[string]int)
-		var creationYears, updateYears []int
 
 		for _, repo := range repos {
 			totalForks += repo.Forks
@@ -177,82 +176,62 @@ func main() {
 				log.Fatal(err)
 			}
 
-			for key, value := range lang {
-				languages[key] += value
-			}
-
-			creationYear, _ := getYear(repo.Created)
-			creationYears = append(creationYears, creationYear)
-
-			updateYear, _ := getYear(repo.Updated)
-			updateYears = append(updateYears, updateYear)
+			printLanguagePercentage(lang)
 		}
-
-		creationDistribution := calculateYearDistribution(creationYears)
-		updateDistribution := calculateYearDistribution(updateYears)
-
-		printStatisticsReport(username, user, len(repos), languages, totalForks, creationDistribution, updateDistribution)
 	}
 
 }
 
-func getYear(dateString string) (int, error) {
-	date, err := time.Parse(time.RFC3339, dateString)
-	if err != nil {
-		return 0, err
-	}
-	return date.Year(), nil
+func printUserTable(user User) {
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.AppendHeader(table.Row{"Login", "ID", "Name", "Public Repos", "Public Gists", "Followers", "Following", "Created At"})
+	t.AppendRow([]interface{}{
+		user.Login,
+		user.ID,
+		user.Name,
+		user.PublicRepos,
+		user.PublicGists,
+		user.Followers,
+		user.Following,
+		user.CreatedAt.Format("2006-01-02"),
+	})
+	t.Render()
 }
 
-func calculateYearDistribution(years []int) map[int]int {
-	distribution := make(map[int]int)
-	for _, year := range years {
-		distribution[year]++
-	}
-	return distribution
-}
-func printStatisticsReport(username string, user User, repoCount int, languages map[string]int, totalForks int, creationDistribution, updateDistribution map[int]int) {
-	fmt.Printf("Statistics Report for %s\n", username)
+func printRepoTable(repos []Repository) {
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.AppendHeader(table.Row{"Name", "Forks", "Created", "Updated"})
 
-	t := table.New("Username", "Repos", "Languages", "Followers", "Forks", "Creation Year", "Update Year", "Activity Distribution")
-
-	languagesStr := formatLanguages(languages)
-	creationDistributionStr := formatYearDistribution(creationDistribution)
-	updateDistributionStr := formatYearDistribution(updateDistribution)
-	activityDistributionStr := formatYearDistribution(calculateActivityDistribution(creationDistribution, updateDistribution))
-
-	t.AddRow(username, fmt.Sprintf("%d", repoCount), languagesStr, fmt.Sprintf("%d", user.Followers), fmt.Sprintf("%d", totalForks), creationDistributionStr, updateDistributionStr, activityDistributionStr)
-
-	fmt.Println(t)
-}
-func formatLanguages(languages map[string]int) string {
-	var langList []string
-	for lang, count := range languages {
-		langList = append(langList, fmt.Sprintf("%s: %d", lang, count))
+	for _, repo := range repos {
+		t.AppendRow([]interface{}{repo.Name, repo.Forks, repo.Created, repo.Updated})
 	}
 
-	sort.Strings(langList)
-	return strings.Join(langList, ", ")
+	t.Render()
 }
 
-func formatYearDistribution(distribution map[int]int) string {
-	var result []string
-	for year, count := range distribution {
-		result = append(result, fmt.Sprintf("%d: %d", year, count))
+func printLanguagePercentage(repoLanguages []Language) {
+	t := table.NewWriter()
+	t.SetOutputMirror(os.Stdout)
+	t.AppendHeader(table.Row{"Language", "Percentage"})
+
+	totalLines := 0
+	for _, lang := range repoLanguages {
+		totalLines += lang.Count
 	}
-	sort.Strings(result)
-	return strings.Join(result, ", ")
+
+	for _, lang := range repoLanguages {
+		percentage := calculatePercentage(lang.Count, totalLines)
+		t.AppendRow([]interface{}{lang.Name, percentage})
+	}
+
+	t.Render()
 }
-func calculateActivityDistribution(creationDistribution, updateDistribution map[int]int) map[int]int {
-	activityDistribution := make(map[int]int)
 
-	for year, count := range creationDistribution {
-		activityDistribution[year] += count
+func calculatePercentage(value, total int) float64 {
+	if total == 0 {
+		return 0.0
 	}
-
-	for year, count := range updateDistribution {
-		activityDistribution[year] += count
-	}
-
-	return activityDistribution
+	return float64(value) / float64(total) * 100.0
 }
