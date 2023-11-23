@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -29,6 +30,10 @@ type Repository struct {
 	Forks   int    `json:"forks"`
 	Created string `json:"created_at"`
 	Updated string `json:"updated_at"`
+}
+
+type Languages []struct {
+	langs map[string]int
 }
 
 func fetchUsersData(username string) (User, error) {
@@ -61,7 +66,7 @@ func fetchUsersData(username string) (User, error) {
 }
 
 func fetchRepos(username string) ([]Repository, error) {
-	url := "https://api.github.com/users/" + username + "/repos"
+	url := "https://api.github.com/users/" + username + "/repos?per_page=80"
 	req, err := http.NewRequest("GET", url, nil)
 
 	if err != nil {
@@ -91,7 +96,7 @@ func fetchRepos(username string) ([]Repository, error) {
 	return repos, err
 }
 
-func fetchLanguages(username, repo string) (map[string]int, error) {
+func fetchLanguages(username, repo string, l *map[string]int) {
 	url := "https://api.github.com/repos/" + username + "/" + repo + "/languages"
 	req, err := http.NewRequest("GET", url, nil)
 
@@ -115,13 +120,9 @@ func fetchLanguages(username, repo string) (map[string]int, error) {
 		log.Fatal(err)
 	}
 
-	var languages map[string]int
-
-	if err = json.Unmarshal(body, &languages); err != nil {
+	if err = json.Unmarshal(body, &l); err != nil {
 		log.Fatal(err)
 	}
-
-	return languages, nil
 }
 
 func setup(filePath string) ([]string, error) {
@@ -145,13 +146,14 @@ func setup(filePath string) ([]string, error) {
 }
 
 func main() {
-	filePath := "D:\\goprojects\\gitnames.txt" // Replace with the path to your file
+	filePath := "D:\\goprojects\\gitnames.txt"
 	usernames, err := setup(filePath)
 	if err != nil {
 		fmt.Print("error reading file:", err)
 		return
 	}
-
+	var repoLangs = make([]Languages, len(usernames))
+	userInd := 0
 	for _, username := range usernames {
 		user, err := fetchUsersData(username)
 		if err != nil {
@@ -163,7 +165,18 @@ func main() {
 			log.Fatal(err)
 		}
 
-		printRepoTable(repos, username)
+		repoInd := 0
+		repoLangs[userInd] = make(Languages, len(repos))
+		for _, repo := range repos {
+			repoLangs[userInd][repoInd].langs = make(map[string]int)
+			fetchLanguages(username, repo.Name, &repoLangs[userInd][repoInd].langs)
+			if err != nil {
+				log.Fatal(err)
+			}
+			repoInd++
+		}
+		printRepoTable(repos, repoLangs, userInd)
+		userInd++
 	}
 
 }
@@ -185,48 +198,48 @@ func printUserTable(user User) {
 	t.Render()
 }
 
-func printRepoTable(repos []Repository, username string) {
+func printRepoTable(repos []Repository, repoLangs []Languages, userInd int) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{"Name", "Forks", "Created", "Updated", "Language 1", "Language 2", "Language 3", "Language 4", "Others"})
-	var totalForks int
+	t.AppendHeader(table.Row{"Name", "Forks", "Created", "Updated", "Languages"})
+	repoInd := 0
+	totalForks := 0
 	for _, repo := range repos {
 		totalForks += repo.Forks
-		lang, err := fetchLanguages(username, repo.Name)
-		if err != nil {
-			log.Fatal(err)
-		}
-		proportion := calculateProportion(lang)
-		t.AppendRow([]interface{}{repo.Name, repo.Forks, repo.Created, repo.Updated,
-			fmt.Sprintf("%.2f%%", proportion["Language 1"]),
-			fmt.Sprintf("%.2f%%", proportion["Language 2"]),
-			fmt.Sprintf("%.2f%%", proportion["Language 3"]),
-			fmt.Sprintf("%.2f%%", proportion["Language 4"]),
-			fmt.Sprintf("%.2f%%", proportion["Others"])})
+		proportion := calculateProportion(repoLangs[userInd][repoInd].langs)
+		ls := formatLanguages(proportion)
+		t.AppendRow([]interface{}{repo.Name, repo.Forks, repo.Created[:10], repo.Updated[:10],
+			ls})
+		repoInd++
 	}
-	//t.AppendRow([]interface{}{fmt.Printf()})
+	t.AppendRow([]interface{}{"Total forks: ", totalForks, " ------ ", " ------ ", " ------ "})
 	t.Render()
+}
+func formatLanguages(proportion map[string]float64) string {
+	var result string
+	for lang, percent := range proportion {
+		result += fmt.Sprintf("%s->%.2f%%|", lang, percent)
+	}
+
+	return strings.TrimSuffix(result, " || ")
 }
 
 func calculateProportion(repoLanguages map[string]int) map[string]float64 {
 	totalBytes := 0
-
-	for _, count := range repoLanguages {
-		totalBytes += count
-	}
-
 	var languages []string
-	for lang := range repoLanguages {
+	for lang, count := range repoLanguages {
+		totalBytes += count
 		languages = append(languages, lang)
 	}
+
 	sort.Slice(languages, func(i, j int) bool {
 		return repoLanguages[languages[i]] > repoLanguages[languages[j]]
 	})
 
 	proportion := make(map[string]float64)
-	numLanguages := min(4, len(languages)) // Take the minimum of 4 and the actual number of languages
+	numLanguages := min(2, len(languages))
 	for i := 0; i < numLanguages; i++ {
-		proportion[languages[i]] = float64(repoLanguages[languages[i]]) / float64(totalBytes) * 100
+		proportion[fmt.Sprintf(languages[i])] = float64(repoLanguages[languages[i]]) / float64(totalBytes) * 100
 	}
 
 	proportion["Others"] = float64(totalBytes)
