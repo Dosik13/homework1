@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"time"
 )
 
@@ -28,11 +29,6 @@ type Repository struct {
 	Forks   int    `json:"forks"`
 	Created string `json:"created_at"`
 	Updated string `json:"updated_at"`
-}
-
-type Language struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
 }
 
 func fetchUsersData(username string) (User, error) {
@@ -95,7 +91,7 @@ func fetchRepos(username string) ([]Repository, error) {
 	return repos, err
 }
 
-func fetchLanguages(username, repo string) ([]Language, error) {
+func fetchLanguages(username, repo string) (map[string]int, error) {
 	url := "https://api.github.com/repos/" + username + "/" + repo + "/languages"
 	req, err := http.NewRequest("GET", url, nil)
 
@@ -111,7 +107,7 @@ func fetchLanguages(username, repo string) ([]Language, error) {
 		log.Fatal(err)
 	}
 
-	fmt.Println("Response statusForLanguage:", resp.Status)
+	//fmt.Println("Response statusForLanguage:", resp.Status)
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -119,7 +115,7 @@ func fetchLanguages(username, repo string) ([]Language, error) {
 		log.Fatal(err)
 	}
 
-	var languages []Language
+	var languages map[string]int
 
 	if err = json.Unmarshal(body, &languages); err != nil {
 		log.Fatal(err)
@@ -166,18 +162,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		printRepoTable(repos)
-		var totalForks int
 
-		for _, repo := range repos {
-			totalForks += repo.Forks
-			lang, err := fetchLanguages(username, repo.Name)
-			if err != nil {
-				log.Fatal(err)
-			}
-
-			printLanguagePercentage(lang)
-		}
+		printRepoTable(repos, username)
 	}
 
 }
@@ -199,39 +185,55 @@ func printUserTable(user User) {
 	t.Render()
 }
 
-func printRepoTable(repos []Repository) {
+func printRepoTable(repos []Repository, username string) {
 	t := table.NewWriter()
 	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{"Name", "Forks", "Created", "Updated"})
-
+	t.AppendHeader(table.Row{"Name", "Forks", "Created", "Updated", "Language 1", "Language 2", "Language 3", "Language 4", "Others"})
+	var totalForks int
 	for _, repo := range repos {
-		t.AppendRow([]interface{}{repo.Name, repo.Forks, repo.Created, repo.Updated})
+		totalForks += repo.Forks
+		lang, err := fetchLanguages(username, repo.Name)
+		if err != nil {
+			log.Fatal(err)
+		}
+		proportion := calculateProportion(lang)
+		t.AppendRow([]interface{}{repo.Name, repo.Forks, repo.Created, repo.Updated,
+			fmt.Sprintf("%.2f%%", proportion["Language 1"]),
+			fmt.Sprintf("%.2f%%", proportion["Language 2"]),
+			fmt.Sprintf("%.2f%%", proportion["Language 3"]),
+			fmt.Sprintf("%.2f%%", proportion["Language 4"]),
+			fmt.Sprintf("%.2f%%", proportion["Others"])})
 	}
-
+	//t.AppendRow([]interface{}{fmt.Printf()})
 	t.Render()
 }
 
-func printLanguagePercentage(repoLanguages []Language) {
-	t := table.NewWriter()
-	t.SetOutputMirror(os.Stdout)
-	t.AppendHeader(table.Row{"Language", "Percentage"})
+func calculateProportion(repoLanguages map[string]int) map[string]float64 {
+	totalBytes := 0
 
-	totalLines := 0
-	for _, lang := range repoLanguages {
-		totalLines += lang.Count
+	for _, count := range repoLanguages {
+		totalBytes += count
 	}
 
-	for _, lang := range repoLanguages {
-		percentage := calculatePercentage(lang.Count, totalLines)
-		t.AppendRow([]interface{}{lang.Name, percentage})
+	var languages []string
+	for lang := range repoLanguages {
+		languages = append(languages, lang)
+	}
+	sort.Slice(languages, func(i, j int) bool {
+		return repoLanguages[languages[i]] > repoLanguages[languages[j]]
+	})
+
+	proportion := make(map[string]float64)
+	numLanguages := min(4, len(languages)) // Take the minimum of 4 and the actual number of languages
+	for i := 0; i < numLanguages; i++ {
+		proportion[languages[i]] = float64(repoLanguages[languages[i]]) / float64(totalBytes) * 100
 	}
 
-	t.Render()
-}
-
-func calculatePercentage(value, total int) float64 {
-	if total == 0 {
-		return 0.0
+	proportion["Others"] = float64(totalBytes)
+	for i := 0; i < numLanguages; i++ {
+		proportion["Others"] -= float64(repoLanguages[languages[i]])
 	}
-	return float64(value) / float64(total) * 100.0
+	proportion["Others"] /= float64(totalBytes) * 100
+
+	return proportion
 }
